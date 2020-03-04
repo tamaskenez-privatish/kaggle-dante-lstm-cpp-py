@@ -289,44 +289,44 @@ void show_tensor(const char* title, torch::Tensor t0)
 // Returns the predicted character and the hidden state.
 tuple<char, torch::Tensor> predict(CharRNN& net,
                                    char chr,
-                                   torch::Tensor h_arg = {},
+                                   torch::Tensor h = {},
                                    maybe<int> top_k = {},
-                                   torch::jit::script::Module module = {})
+                                   maybe<torch::jit::script::Module> m_module = {})
 {
     // tensor inputs
     auto x = torch::tensor({{net.charmap.char2int(chr)}});
     auto inputs = torch::one_hot(x, ~net.charmap).toType(torch::kFloat);
 
-    show_tensor("inputs hot: ", inputs);
+    //show_tensor("inputs hot: ", inputs);
 
     // detach hidden state from history
-    if (h_arg.has_storage()) {
-        h_arg = h_arg.data();  //?
+    if (h.has_storage()) {
+        h = h.data();  //?
     }
     // get the output of the model
     torch::Tensor out;
-    if (module._ivalue()) {
-        assert(h_arg.size(0) == 2);
-        auto tuple_h_c = torch::ivalue::Tuple::create(h_arg[0], h_arg[1]);
+    if (m_module) {
+        assert(h.size(0) == 2);
+        auto tuple_h_c = torch::ivalue::Tuple::create(h[0], h[1]);
         vector<torch::IValue> forward_input_vec{inputs, tuple_h_c};
-        auto tuple_out_h = module.forward(forward_input_vec);
+        auto tuple_out_h = m_module->forward(forward_input_vec);
         const auto& vec_out_h = tuple_out_h.toTuple()->elements();
         out = vec_out_h[0].toTensor();
         const auto& vec_h_c_next = vec_out_h[1].toTuple()->elements();
         auto state_h = vec_h_c_next[0].toTensor().unsqueeze(0);
         auto state_c = vec_h_c_next[1].toTensor().unsqueeze(0);
-        h_arg = torch::cat({state_h, state_c}, 0);
+        h = torch::cat({state_h, state_c}, 0);
     } else {
-        auto out_h = net.forward(inputs, h_arg);
+        auto out_h = net.forward(inputs, h);
         out = out_h.output;
-        h_arg = out_h.state;
+        h = out_h.state;
     }
     // get the character probabilities
     // apply softmax to get p probabilities for the likely next character giving x
     auto p =
         torch::nn::functional::softmax(out, torch::nn::functional::SoftmaxFuncOptions(1));
 
-    show_tensor("p: ", p);
+    //show_tensor("p: ", p);
 
     // get top characters
     // considering the k most probable characters with topk method
@@ -364,14 +364,14 @@ tuple<char, torch::Tensor> predict(CharRNN& net,
     }
 
     // return the encoded value of the predicted char and the hidden state
-    return {net.charmap.int2char(*result), h_arg};
+    return {net.charmap.int2char(*result), h};
 }
 
 string sample(CharRNN& net,
               int size,
               const string& prime = "Il",
               maybe<int> top_k = {},
-              torch::jit::script::Module module = {})
+              maybe<torch::jit::script::Module> m_module = {})
 {
     net.eval();
 
@@ -380,13 +380,13 @@ string sample(CharRNN& net,
     auto h = net.init_hidden(1);
     char chr;
     for (auto ch : prime) {
-        tie(chr, h) = predict(net, ch, h, top_k, module);
+        tie(chr, h) = predict(net, ch, h, top_k, m_module);
     }
     chars += chr;
 
     // Now pass in the previous character and get a new one
     FOR (ii, 0, < size) {
-        tie(chr, h) = predict(net, chars.back(), h, top_k, module);
+        tie(chr, h) = predict(net, chars.back(), h, top_k, m_module);
         chars += chr;
     }
     return chars;
@@ -486,7 +486,7 @@ void load_pt_and_sample()
     auto module = torch::jit::load(CMAKE_CURRENT_SOURCE_DIR "/traced.pt");
     auto vs = net->parameters();
     load_python_save(CMAKE_CURRENT_SOURCE_DIR "/a.txt", vs);
-    auto s = sample(*net, 1000, "Nel ", 1, module);
+    auto s = sample(*net, 1000, "Nel ", 5, module);
     printf("%s\n", s.c_str());
     printf("-------------------\n");
     s = sample(*net, 800, "E disse ", 5, module);
