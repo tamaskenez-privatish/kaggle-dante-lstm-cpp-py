@@ -1,0 +1,5 @@
+/.idea/
+/cmake-build-*/
+/examples/
+/charrnn_net_dante.pt
+__pycache__
